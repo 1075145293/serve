@@ -1,20 +1,9 @@
 const express = require('express');
-const uuid = require('uuid');
+
 const bodyParser = require('body-parser');
 const mysql = require('mysql');
 const dbConfig = require('./config/mysql');
 const sql = require('./sql/index');
-const pool = mysql.createPool( dbConfig.mysql );
-const email = require('./email/index')
-
-const responseJSON = function (res, ret) {
-    if(typeof ret === 'undefined') {
-        res.json({     code:'-200',     msg: '操作失败'
-        });
-    } else {
-        res.json(ret);
-    }};
-
 const serialize = function (res) {
     const dataString = JSON.stringify(res);
     const jsonData = JSON.parse(dataString);
@@ -25,99 +14,78 @@ const app = express();
 
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// 注册
-app.post('/api/register', function(req, res, next){
-    // 从连接池获取连接
-    pool.getConnection(function(err, connection) {
-// 获取前台页面传过来的参数
-        if (err) throw  err
-        const {phone,nickName,password} = req.body
-        const user_uuid = uuid.v1()
-// 建立连接 检查用户是否已存在
-        let response
-        try {
-            connection.query(sql.check, [nickName,phone], function(err, result){
-                if (err) throw err
-                const jsonData = serialize(result);
-                if(jsonData.length > 0) {
-                    let msg = ''
-                    if (jsonData[0].nickName === nickName ) {
-                        msg = '用户名已存在'
-                    } else if (jsonData[0].phone === phone){
-                        msg = '手机号已存在'
-                    }
-                    response = {
-                        code: 100,
-                        msg
-                    };
-                    responseJSON(res, response);
-                } else {
-                    try {
-                        const data = [user_uuid,phone,nickName,password]
-                        connection.query(sql.register, data, function(err, ret) {
-                            if (err) throw err
-                            const resData = serialize(ret);
-                            if(resData) {
-                                console.log(1)
-                                response = {
-                                    code: 0,
-                                    msg:'增加成功'
-                                };
-                                email.sendEmail(`${nickName}注册啦`)
-                            }
-                            responseJSON(res, response);
-                        });
-                    }
-                    catch (e) {
-                        throw e
-                    }
-                }
-            })
+function timestampToTime(da) {
+    var date = new Date();//时间戳为10位需*1000，时间戳为13位的话不需乘1000
+    Y = date.getFullYear() + '-';
+    M = (date.getMonth()+1 < 10 ? '0'+(date.getMonth()+1) : date.getMonth()+1) + '-';
+    D = (date.getDate() < 10 ? '0'+date.getDate() : date.getDate()) + ' ';
+    return Y+M+D
+}
+
+
+app.post('/api/postIdea', function (req, res, next) {
+    var connection = mysql.createConnection(dbConfig.mysql);
+    connection.connect();
+    const { name, interpretation, idea } = req.body
+    const date = timestampToTime()
+    //查
+    connection.query(sql.addIdea, [name, idea, interpretation, date],function (err, result) {
+        if (err) {
+            console.log('[INSERT ERROR] - ', err.message);
+            return;
         }
-        catch (err) {
-            throw err
-        }
+        res.send({
+            code: 0,
+            msg: '',
+        })
     });
-});
-// 登录
-app.get('/api/login',function (req,res,next) {
-    pool.getConnection(function(err, connection) {
-        if (err) throw err
-// 获取前台页面传过来的参数
-        const {phone,password} = req.query || req.params
-// 建立连接 检查用户是否已存在
-        let response
-        try {
-            connection.query(sql.checkAccount, [phone,password], function(err, result) {
-                if (err) throw err
-                const jsonData = serialize(result);
-                if(jsonData.length === 0) {
-                    response = {
-                        code: 100,
-                        msg: '用户名或密码错误'
-                    };
-                    // 释放连接
-                }else {
-                    response = {
+    connection.end();
+})
+app.get('/api/searchIdea', function (req, res, next) {
+    const connection = mysql.createConnection(dbConfig.mysql);
+    connection.connect();
+    let sqlStr = sql.searchIdea
+    let sqlLimit;
+    const { keyWords, page, pageSize } = req.query || req.params
+    let currentPage = page ? page - 1 : 0;
+    let size = pageSize ? pageSize : 20 ;
+    if(keyWords){
+        sqlLimit = `SELECT * FROM idea WHERE CONCAT( name, idea, interpretation ) LIKE '%${keyWords}%' limit ${currentPage * size},${size}`
+    }else{
+        sqlLimit = `SELECT * FROM idea limit ${currentPage * size},${size}`
+    }
+    //查
+    connection.query(sqlStr, function (err, result) {
+        if (err) {
+            console.log('[SELECT ERROR] - ', err.message);
+            res.send({
+                code: -999,
+                msg: 'error',
+            })
+            return;
+        }else{
+            const connection = mysql.createConnection(dbConfig.mysql);
+            connection.connect();
+            connection.query(sqlLimit,function(err,result1){
+                if(err){
+                    console.log('[SELECT ERROR] - ', err.message);
+                    return;
+                }else{
+                    const resData = serialize(result1);
+                    res.send({
                         code: 0,
                         msg: '',
-                        data: {
-                            nickName: jsonData[0].nickName,
-                            uuid:jsonData[0].uuid,
-                            phone:jsonData[0].phone,
-                        }
-                    }
+                        res: resData,
+                        pageSize:20,
+                        total: result.length,
+                        page:page
+                    })
                 }
-                responseJSON(res, response);
-                connection.release();
             })
         }
-        catch (e) {
-            throw e
-        }
     });
+    connection.end();
 })
-
-app.listen(8081,function () {
-    console.log('服务器正在监听8081端口....')
+app.listen(8081, function () {
+    console.log('服务器正在监听3000端口....')
 })
