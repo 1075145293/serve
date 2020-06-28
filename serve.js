@@ -51,6 +51,7 @@ app.get('/api/searchIdea', function (req, res, next) {
     let size = pageSize ? pageSize : 20 ;
     if(keyWords){
         sqlLimit = `SELECT * FROM idea WHERE CONCAT( name, idea, interpretation ) LIKE '%${keyWords}%' limit ${currentPage * size},${size}`
+        sqlStr = `SELECT * FROM idea WHERE CONCAT( name, idea, interpretation ) LIKE '%${keyWords}%'`
     }else{
         sqlLimit = `SELECT * FROM idea limit ${currentPage * size},${size}`
     }
